@@ -1,11 +1,18 @@
 name = "LatticeLab"
 uuid = "cb4ee63c-0e62-45dd-a590-1961791c9329"
-authors = ["Yunlong Lian <algorithm.lian@gmail.com>"]
 version = "0.1.0"
+authors = ["Yunlong Lian <algorithm.lian@gmail.com>"]
 
 [deps]
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 PlotSVG = "38244590-38c0-4f85-8105-e5c469effcd5"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Spglib = "f761d5c5-86db-4880-b97f-9680a7cccfb5"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+julia = "1.11"
+Random = "1.11"
+Test = "1.11"

@@ -37,7 +37,9 @@ function generate_R0_compute_EqV(
     N_min, N_max = bounding_box_Nmin_Nmax(a, bbox, margin)
     Trans        = bbox[2]*diagm(0=>bbox[3])  #! supercell trans Bravais vects
 
-    @info "generate_R0_compute_EqV() : \n\t\t bbox = $(bbox)\n\t\t N_min, N_max = $((N_min,N_max))"
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        @info "generate_R0_compute_EqV() : \n\t\t bbox = $(bbox)\n\t\t N_min, N_max = $((N_min,N_max))"
+    end
     @assert all(N_min .<= 0) && all(N_max .>= 0)
     iter_N_min_max = iter_t(N_min, N_max, dim)  # regardless of bd conds
     all_t = collect(iter_N_min_max)
@@ -51,18 +53,36 @@ function generate_R0_compute_EqV(
     Nsites = length(sublattice_index)
     ids    = Dict((t,s)=>i for (i,(t,s)) in enumerate(zip(translation_vecs,sublattice_index)))
 
-    @info "generate_R0_compute_EqV() : compute EqV ..."
-    print(""); flush(stdout);
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        @info "generate_R0_compute_EqV() : compute EqV ..."
+    end
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        print(""); flush(stdout);
+    end
     #TODO bottleneck
     EqV = fill(-1,Nsites)
-    @time begin
-        @inline inside_bbox(s,t) = (t ∈ all_t && s ∈ 1:Nsubl) && inbbox(all_sites[:,ids[(t,s)]] .- origin,invS)
-        #inside = Dict((t,s)=>i for (i,(t,s)) ∈ enumerate(zip(translation_vecs, sublattice_index))  if inside_bbox(s,t))
-        inside = Dict((t,s)=>i for (i,(s,t)) ∈ enumerate(subl_trans)  if inside_bbox(s,t))
-        SHIFTS = collect(Iterators.product([-(7*Int(pbc[d])):(7*Int(pbc[d])) for d=1:dim]...)) ;
-        SHIFTS_ABS = map(v->Trans*[v...,], SHIFTS);
-        p0  = findfirst(v->all(v.==0), SHIFTS)
-        ii  = 1
+    @inline inside_bbox(s,t) = (t ∈ all_t && s ∈ 1:Nsubl) && inbbox(all_sites[:,ids[(t,s)]] .- origin,invS)
+    #inside = Dict((t,s)=>i for (i,(t,s)) ∈ enumerate(zip(translation_vecs, sublattice_index))  if inside_bbox(s,t))
+    inside = Dict((t,s)=>i for (i,(s,t)) ∈ enumerate(subl_trans)  if inside_bbox(s,t))
+    SHIFTS = collect(Iterators.product([-(7*Int(pbc[d])):(7*Int(pbc[d])) for d=1:dim]...)) ;
+    SHIFTS_ABS = map(v->Trans*[v...,], SHIFTS);
+    p0  = findfirst(v->all(v.==0), SHIFTS)
+    ii  = 1
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        @time begin
+            for t ∈ iter_N_min_max
+                for s ∈ 1:Nsubl
+                    #p = findfirst(v->inside_bbox(s,((t.+Trans*[v...,])...,)), SHIFTS)
+                    p = findfirst(v->inside_bbox(s,((t.+v)...,)), SHIFTS_ABS)
+                    if p!==nothing
+                        #EqV[ii] = (p==p0 ? 0 : inside[(t.+(Trans*[SHIFTS[p]...,]...,),s)])
+                        EqV[ii] = (p==p0 ? 0 : inside[(t.+(SHIFTS_ABS[p]...,),s)])
+                    end
+                    ii += 1
+                end
+            end
+        end
+    else
         for t ∈ iter_N_min_max
             for s ∈ 1:Nsubl
                 #p = findfirst(v->inside_bbox(s,((t.+Trans*[v...,])...,)), SHIFTS)
@@ -75,7 +95,9 @@ function generate_R0_compute_EqV(
             end
         end
     end
-    print(""); flush(stdout);
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        print(""); flush(stdout);
+    end
     return all_sites, sublattice_index, EqV
 end
 
@@ -178,9 +200,65 @@ function generate_f(
     @inline outside(t) = (any(t.-N_min.<0) || any(N_max.-t.<0))
 
     #! main loop
-    @info "generate_f() : main loop ..."
-    @time begin
-        #% for each sublattice pair (iδ,jδ)
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        @info "generate_f() : main loop ..."
+    end
+
+    #% for each sublattice pair (iδ,jδ)
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        @time begin
+            for (iδ,jδ) ∈ Iterators.product(1:Nsubl,1:Nsubl)
+                # for (i,j) ∈ (I,J), either i or j in bounding box
+                #% for each label
+                for (label, directions) ∈ IJFD[(jδ,iδ)]
+                    # (jδ,iδ) NOT (iδ,jδ)
+                    # because  CONVENTION j-->i for Lattice.f[i,j]
+                    # and      CONVENTION s-->t for spring[(s,t)]
+                    #% for each direction
+                    for d ∈ directions
+                        d_m_δi = d.-δ[:,iδ]
+                        d_p_δj = d.+δ[:,jδ]
+                        #% case I : jδ = j%t in bounding box
+                        # R[j] + d = R[i] = δ[i%t] + t[i]
+                        # t[i] = R[j] + d - δ[i%t]
+                        #% for each site jj in bounding box on sublattice jδ
+                        for j0 ∈ innerid[jδ]
+                            #% compute all ii such that   direction .+ R0[:,jj] == R0[:,ii]
+                            Bravais = trans(d_m_δi.+R0[:,j0])
+                            if outside(Bravais)  continue  end
+                            i1 = iδ+(index_t(Bravais,N_min,N_max,dim)-1)*Nsubl
+                            #% check
+                            if !check(i1,j0,d)
+                                throw(error("(iδ,jδ,i1,j0)=($iδ,$jδ,$i1,$j0) incompatible ! dR=$(R0[:,i1].-R0[:,j0]), dir=$(d)"))
+                            end
+                            #% record
+                            if in_bbox_check(R0[:,i1])
+                                push!(I,i1); push!(J,j0); push!(V,label);
+                            end
+                        end
+                        #% case II : iδ = i%t in bounding box
+                        # R[j] + d = δ[j%t] + t[j] + d = R[i]
+                        # t[j] = R[i] - d - δ[j%t]
+                        #% for each site ii in bounding box on sublattice iδ
+                        for i0 ∈ innerid[iδ]
+                            #% compute all jj such that   R0[:,jj] == R0[:,ii] .+ direction
+                            Bravais = trans(R0[:,i0].-d_p_δj)
+                            if outside(Bravais)  continue  end
+                            j1 = jδ+(index_t(Bravais,N_min,N_max,dim)-1)*Nsubl
+                            #% check
+                            if !check(i0,j1,d)
+                                throw(error("(iδ,jδ,i0,j1)=($iδ,$jδ,$i0,$j1) incompatible ! dR=$(R0[:,i0].-R0[:,j1]), dir=$(d)"))
+                            end
+                            #% record
+                            if in_bbox_check(R0[:,j1])
+                                push!(I,i0); push!(J,j1); push!(V,label);
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    else
         for (iδ,jδ) ∈ Iterators.product(1:Nsubl,1:Nsubl)
             # for (i,j) ∈ (I,J), either i or j in bounding box
             #% for each label
@@ -232,7 +310,9 @@ function generate_f(
             end
         end
     end
-    print(""); flush(stdout);
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        print(""); flush(stdout);
+    end
     conflicts = check_conflicts(I,J,V)
     ⊛(a,b) = b
     return sparse(I, J, V, Nsites, Nsites, ⊛), conflicts
@@ -255,16 +335,24 @@ function build_lattice(
     #: the direction vectors in LnInfo.SPNB
     #TODO tighten the margin for speed !!!
     margin  = compute_Bravais_cutoff(LnInfo, inv(LnInfo.UC.a))
-    @info "build_lattice() : \n\t\t margin = $(margin)"
-    print(""); flush(stdout);
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        @info "build_lattice() : \n\t\t margin = $(margin)"
+    end
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        print(""); flush(stdout);
+    end
 
     R0, Subl, EqV = generate_R0_compute_EqV(LnInfo.UC, bbox, margin)
     Nsites  = size(R0,2)
-    print(""); flush(stdout);
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        print(""); flush(stdout);
+    end
 
     f, conflicts  = generate_f(LnInfo, R0, bbox, margin, Nsites)
     @assert  length(conflicts)==0   "conflicts = $conflicts"
-    print(""); flush(stdout);
+    if get(ENV, "LATTICE_DEBUG", "false") == "true"
+        print(""); flush(stdout);
+    end
 
     _DEBUG_MODE_ ? (length(conflicts)>0  &&  @warn("\n"*join(string.(conflicts), "\n"))) : @assert(length(conflicts)==0)
 

@@ -233,7 +233,7 @@ function BdGHamiltonian(
     q::Vector,
     HMAT::Dict,
     ΔMAT::Dict,
-    iσy, a ) where {T<:Dict, N}
+    iσy, a )
     H = qMAT(q,HMAT,a)
     Δ = qMAT(q,ΔMAT,a)
     return (   blkσ11(H)                   # the band Hamiltonian(en)Q

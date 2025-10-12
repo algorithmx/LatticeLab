@@ -51,7 +51,7 @@ function solve_eigenmodes(
     dmr::DynamicalMatricesR;
     EPS = 1e-10,
     test = true
-    ) where { T<:AbstractMatrix }
+    )
     sqrt_eigen( x ) = sqrt(max(0.0,real(x)))
     test_eigen_DR( e ) = all_non_negative_real_v1( e, EPS ) || ( ! test )
     solve_eigenmodes( sum(coeff.*ds for (coeff,ds) ∈ zip(dmr.COEFFS,dmr.DS)),
